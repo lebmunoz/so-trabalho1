@@ -1,8 +1,10 @@
 #include <curses.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <time.h>
 #include <pthread.h>
+#include <semaphore.h>
 
 #define NUM_TOKENS 5
 
@@ -23,8 +25,9 @@ void clear_board(void);
 void token_refresh(void);
 bool token_has_collision(int i);
 void cursor_refresh(void);
+sem_t mutex;
 
-int difficulty = HARD;
+int difficulty = EASY;
 char board[LINES][COLS];
 
 typedef struct CoordStruct {
@@ -41,6 +44,7 @@ int main(void) {
     pthread_t a_thread[NUM_TOKENS];
     void *thread_result;
     int tokens;
+    sem_init(&mutex, 0, 1);
 
     srand(time(NULL));  /* inicializa gerador de numeros aleatorios */
 
@@ -77,7 +81,7 @@ int main(void) {
     }
 
     for(tokens = 0; tokens < NUM_TOKENS; tokens++) {
-        res = pthread_create(&(a_thread[tokens]), NULL, handle_tokens, (void *) &tokens);
+        res = pthread_create(&(a_thread[tokens]), NULL, handle_tokens, (void *)(intptr_t)tokens);
         if (res != 0) {
             perror("Criacao de Thread falhou");
             exit(EXIT_FAILURE);
@@ -90,12 +94,13 @@ int main(void) {
             perror("Thread falhou no join");
         }
     }
-    res = pthread_join(game_thread, &thread_result);
-    if (res != 0) {
-        perror("Thread falhou no join");
-    }
-    printf("Todas terminaram\n");
+    printf("Comeu todas as threads!\n");
     exit(EXIT_SUCCESS);
+    // res = pthread_join(game_thread, &thread_result);
+    // if (res != 0) {
+    //     perror("Thread falhou no join");
+    // }
+    // printf("Todas terminaram\n");
 }
 
 void clear_board(void) {
@@ -109,12 +114,10 @@ void clear_board(void) {
             mvaddch(y, x, EMPTY);
             attroff(COLOR_PAIR(EMPTY_PAIR));
         }
-
 }
 
 void token_refresh(void) {
     int i;
-
     clear_board();
 
     /* poe os tokens no tabuleiro */
@@ -173,13 +176,44 @@ void draw_board(void) {
             board[x][y] = 0;
 }
 
+void board_refresh(void) {
+  int x, y, i;
+
+  /* redesenha tabuleiro "limpo" */
+  sem_wait(&mutex);
+  for (x = 0; x < COLS; x++) 
+    for (y = 0; y < LINES; y++){
+      attron(COLOR_PAIR(EMPTY_PAIR));
+      mvaddch(y, x, EMPTY);
+      attroff(COLOR_PAIR(EMPTY_PAIR));
+  }
+
+  /* poe os tokens no tabuleiro */
+
+  for (i = 0; i < NUM_TOKENS; i++) {
+    attron(COLOR_PAIR(TOKEN_PAIR));
+    mvaddch(coord_tokens[i].y, coord_tokens[i].x, EMPTY);
+    attroff(COLOR_PAIR(TOKEN_PAIR));
+  }
+  /* poe o cursor no tabuleiro */
+
+  move(y, x);
+  refresh();
+  attron(COLOR_PAIR(CURSOR_PAIR));
+  mvaddch(cursor.y, cursor.x, EMPTY);
+  attroff(COLOR_PAIR(CURSOR_PAIR));
+  sem_post(&mutex);
+}
+
 void *handle_tokens(void *arg) {
-    int my_number = *(int *)arg;
+    int my_number = (intptr_t) arg;
 
     do {
+        //sem_wait(&mutex);
         move_token(my_number); /* move os tokens aleatoriamente */
-        token_refresh(); /* atualiza token no tabuleiro */
+        board_refresh(); /* atualiza token no tabuleiro */
         sleep(difficulty);
+        //sem_post(&mutex);
     }
     while(!token_has_collision(my_number));
 
@@ -192,8 +226,10 @@ void *handle_cursor(void *arg) {
     int ch;
 
     do {
-        cursor_refresh(); /* atualiza cursor no tabuleiro */
+        // cursor_refresh(); /* atualiza cursor no tabuleiro */
 
+        board_refresh();
+        
         ch = getch();
         switch (ch) {
             case KEY_UP:
