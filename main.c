@@ -16,19 +16,30 @@
 #define COLS 11
 #define EASY 4
 #define HARD 1
+#define TK_CAPTURED 0
+#define TK_FREE 1
+#define GM_RUNNING 0
+#define GM_STOP 1
 
 void *handle_tokens(void *arg);
 void *handle_cursor(void *arg);
+void *handle_game(void *arg);
 void move_token(int token);
 void draw_board(void);
 void clear_board(void);
 void token_refresh(void);
 bool token_has_collision(int i);
 void cursor_refresh(void);
+void set_token_status(int t, int st);
+int get_token_status(int t);
+void set_game_status(int s);
+int get_game_status();
 sem_t mutex;
 
 int difficulty = EASY;
 char board[LINES][COLS];
+int token_status[NUM_TOKENS];
+int game_status = GM_RUNNING;
 
 typedef struct CoordStruct {
     int x;
@@ -39,11 +50,13 @@ coord_type cursor, coord_tokens[NUM_TOKENS];
 
 int main(void) {
     int game;
+    int csr;
     int res;
     pthread_t game_thread;
+    pthread_t cursor_thread;
     pthread_t a_thread[NUM_TOKENS];
     void *thread_result;
-    int tokens;
+    int tk;
     sem_init(&mutex, 0, 1);
 
     srand(time(NULL));  /* inicializa gerador de numeros aleatorios */
@@ -74,33 +87,35 @@ int main(void) {
 
     draw_board(); /* inicializa tabuleiro */
 
-    game = pthread_create(&(game_thread), NULL, handle_cursor, NULL);
+    game = pthread_create(&(game_thread), NULL, handle_game, NULL);
     if (game != 0) {
         perror("Criacao de Thread falhou");
         exit(EXIT_FAILURE);
     }
 
-    for(tokens = 0; tokens < NUM_TOKENS; tokens++) {
-        res = pthread_create(&(a_thread[tokens]), NULL, handle_tokens, (void *)(intptr_t)tokens);
+    csr = pthread_create(&(cursor_thread), NULL, handle_cursor, NULL);
+    if (csr != 0) {
+        perror("Criacao de Thread falhou");
+        exit(EXIT_FAILURE);
+    }
+
+    for(tk = 0; tk < NUM_TOKENS; tk++) {
+        token_status[tk] = TK_FREE;
+        res = pthread_create(&(a_thread[tk]), NULL, handle_tokens, (void *)(intptr_t)tk);
         if (res != 0) {
             perror("Criacao de Thread falhou");
             exit(EXIT_FAILURE);
         }
     }
-//    printf("Esperando por thread finalizar...\n");
-    for(tokens = NUM_TOKENS - 1; tokens >= 0; tokens--) {
-        res = pthread_join(a_thread[tokens], &thread_result);
+    
+    for(tk = NUM_TOKENS - 1; tk >= 0; tk--) {
+        res = pthread_join(a_thread[tk], &thread_result);
         if (res != 0) {
             perror("Thread falhou no join");
         }
     }
     printf("Comeu todas as threads!\n");
     exit(EXIT_SUCCESS);
-    // res = pthread_join(game_thread, &thread_result);
-    // if (res != 0) {
-    //     perror("Thread falhou no join");
-    // }
-    // printf("Todas terminaram\n");
 }
 
 void clear_board(void) {
@@ -205,17 +220,28 @@ void board_refresh(void) {
   sem_post(&mutex);
 }
 
+void set_token_status(int t, int st) {
+    token_status[t] = st;
+}
+
+int get_token_status(int t) {
+    return token_status[t];
+}
+
+void set_game_status(int s) {
+    game_status = s;
+}
+int get_game_status(){
+    return game_status;
+}
+
 void *handle_tokens(void *arg) {
     int my_number = (intptr_t) arg;
-
     do {
-        //sem_wait(&mutex);
         move_token(my_number); /* move os tokens aleatoriamente */
         board_refresh(); /* atualiza token no tabuleiro */
         sleep(difficulty);
-        //sem_post(&mutex);
-    }
-    while(!token_has_collision(my_number));
+    } while(get_token_status(my_number) != TK_CAPTURED);
 
     printf("Comeu a thread %d\n", my_number);
     pthread_exit(NULL);
@@ -260,10 +286,22 @@ void *handle_cursor(void *arg) {
                     cursor.x = cursor.x + 1;
                 }
                 break;
+            case 'q':
+            case 'Q':
+                set_game_status(GM_STOP);
         }
-    }while ((ch != 'q') && (ch != 'Q'));
+    }while (get_game_status() == GM_RUNNING);
     endwin();
+    pthread_exit(NULL);
+}
 
-//    printf("Fim de jogo %d\n", my_number);
+void *handle_game(void *arg) {
+    do {
+        for (int i = 0; i < NUM_TOKENS; ++i) {
+            if (token_has_collision(i)) {
+                set_token_status(i, TK_CAPTURED);
+            }
+        }
+    }while (get_game_status() == GM_RUNNING);
     pthread_exit(NULL);
 }
