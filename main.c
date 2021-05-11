@@ -1,3 +1,5 @@
+// gcc -Wall -o jogo main.c -lcurses -lpthread
+
 #include <curses.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -26,11 +28,8 @@ void *handle_cursor(void *arg);
 void *handle_game(void *arg);
 void move_token(int token);
 void draw_board(void);
-void clear_board(void);
-void token_refresh(void);
 bool token_has_collision(int i);
-void cursor_refresh(void);
-void set_token_status(int t, int st);
+void capture_token(int t);
 int get_token_status(int t);
 void set_game_status(int s);
 int get_game_status();
@@ -56,6 +55,8 @@ int main(void) {
     pthread_t cursor_thread;
     pthread_t a_thread[NUM_TOKENS];
     void *thread_result;
+    void *game_thread_result;
+    void *cursor_thread_result;
     int tk;
     sem_init(&mutex, 0, 1);
 
@@ -99,7 +100,7 @@ int main(void) {
         exit(EXIT_FAILURE);
     }
 
-    for(tk = 0; tk < NUM_TOKENS; tk++) {
+    for (tk = 0; tk < NUM_TOKENS; tk++) {
         token_status[tk] = TK_FREE;
         res = pthread_create(&(a_thread[tk]), NULL, handle_tokens, (void *)(intptr_t)tk);
         if (res != 0) {
@@ -108,58 +109,26 @@ int main(void) {
         }
     }
     
-    for(tk = NUM_TOKENS - 1; tk >= 0; tk--) {
+    for (tk = NUM_TOKENS - 1; tk >= 0; tk--) {
         res = pthread_join(a_thread[tk], &thread_result);
         if (res != 0) {
             perror("Thread falhou no join");
         }
     }
+    game = pthread_join(game_thread, &game_thread_result);
+    if (game != 0) {
+        perror("Thread falhou no join");
+    }
+    csr = pthread_join(cursor_thread, &cursor_thread_result);
+    if (csr != 0) {
+        perror("Thread falhou no join");
+    }
     printf("Comeu todas as threads!\n");
     exit(EXIT_SUCCESS);
 }
 
-void clear_board(void) {
-    int x, y;
-
-    /* redesenha tabuleiro "limpo" */
-
-    for (x = 0; x < COLS; x++)
-        for (y = 0; y < LINES; y++){
-            attron(COLOR_PAIR(EMPTY_PAIR));
-            mvaddch(y, x, EMPTY);
-            attroff(COLOR_PAIR(EMPTY_PAIR));
-        }
-}
-
-void token_refresh(void) {
-    int i;
-    clear_board();
-
-    /* poe os tokens no tabuleiro */
-
-    for (i = 0; i < NUM_TOKENS; i++) {
-        attron(COLOR_PAIR(TOKEN_PAIR));
-        mvaddch(coord_tokens[i].y, coord_tokens[i].x, EMPTY);
-        attroff(COLOR_PAIR(TOKEN_PAIR));
-    }
-}
-
 bool token_has_collision(int i) {
     return cursor.x == coord_tokens[i].x && cursor.y == coord_tokens[i].y;
-}
-
-void cursor_refresh(void) {
-    int x, y;
-
-    clear_board();
-
-    /* poe o cursor no tabuleiro */
-
-    move(y, x);
-    refresh();
-    attron(COLOR_PAIR(CURSOR_PAIR));
-    mvaddch(cursor.y, cursor.x, EMPTY);
-    attroff(COLOR_PAIR(CURSOR_PAIR));
 }
 
 void move_token(int token) {
@@ -167,10 +136,10 @@ void move_token(int token) {
 
     /* determina novas posicoes (coordenadas) do token no tabuleiro (matriz) */
 
-    do{
+    do {
         new_x = rand()%(COLS);
         new_y = rand()%(LINES);
-    } while((board[new_x][new_y] != 0) || ((new_x == cursor.x) && (new_y == cursor.y)));
+    } while ((board[new_x][new_y] != 0) || ((new_x == cursor.x) && (new_y == cursor.y)));
 
     /* retira token da posicao antiga  */
 
@@ -220,8 +189,8 @@ void board_refresh(void) {
   sem_post(&mutex);
 }
 
-void set_token_status(int t, int st) {
-    token_status[t] = st;
+void capture_token(int t) {
+//    token_status[t] = TK_CAPTURED;
 }
 
 int get_token_status(int t) {
@@ -241,19 +210,16 @@ void *handle_tokens(void *arg) {
         move_token(my_number); /* move os tokens aleatoriamente */
         board_refresh(); /* atualiza token no tabuleiro */
         sleep(difficulty);
-    } while(get_token_status(my_number) != TK_CAPTURED);
+    } while (get_token_status(my_number) != TK_CAPTURED);
 
     printf("Comeu a thread %d\n", my_number);
     pthread_exit(NULL);
 }
 
 void *handle_cursor(void *arg) {
-//    int my_number = *(int *)arg;
     int ch;
 
     do {
-        // cursor_refresh(); /* atualiza cursor no tabuleiro */
-
         board_refresh();
         
         ch = getch();
@@ -290,7 +256,7 @@ void *handle_cursor(void *arg) {
             case 'Q':
                 set_game_status(GM_STOP);
         }
-    }while (get_game_status() == GM_RUNNING);
+    } while (get_game_status() == GM_RUNNING);
     endwin();
     pthread_exit(NULL);
 }
@@ -299,9 +265,9 @@ void *handle_game(void *arg) {
     do {
         for (int i = 0; i < NUM_TOKENS; ++i) {
             if (token_has_collision(i)) {
-                set_token_status(i, TK_CAPTURED);
+                capture_token(i);
             }
         }
-    }while (get_game_status() == GM_RUNNING);
+    } while (get_game_status() == GM_RUNNING);
     pthread_exit(NULL);
 }
