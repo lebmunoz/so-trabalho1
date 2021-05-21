@@ -32,8 +32,9 @@ int get_token_status(int t);
 void set_game_status(int s);
 int get_game_status();
 sem_t mutex;
+sem_t mutex_2;
 
-int difficulty = HARD;
+int difficulty = EASY;
 char board[LINES][COLS];
 int token_status[NUM_TOKENS];
 int game_status = GM_RUNNING;
@@ -54,6 +55,7 @@ int main(void) {
     void *cursor_thread_result;
     int tk;
     sem_init(&mutex, 0, 1);
+    sem_init(&mutex_2, 0, 1);
 
     srand(time(NULL));  /* inicializa gerador de numeros aleatorios */
 
@@ -121,7 +123,7 @@ void move_token(int token) {
     int i = token, new_x, new_y;
 
     /* determina novas posicoes (coordenadas) do token no tabuleiro (matriz) */
-
+    sem_wait(&mutex_2);
     do {
         new_x = rand()%(COLS);
         new_y = rand()%(LINES);
@@ -135,6 +137,7 @@ void move_token(int token) {
     /* coloca token na nova posicao */
     coord_tokens[i].x = new_x;
     coord_tokens[i].y = new_y;
+    sem_post(&mutex_2);
 }
 
 void draw_board(void) {
@@ -189,9 +192,9 @@ int get_game_status(){
 void *handle_tokens(void *arg) {
     int my_number = (intptr_t) arg;
     do {
+        sleep(difficulty);
         move_token(my_number); /* move os tokens aleatoriamente */
         board_refresh(); /* atualiza token no tabuleiro */
-        sleep(difficulty);
     } while (get_token_status(my_number) != TK_CAPTURED);
 
     printf("Capturou a thread %d\n", my_number);
@@ -232,6 +235,12 @@ void *handle_cursor(void *arg) {
                 if ((cursor.x < COLS - 1)) {
                     cursor.x = cursor.x + 1;
                 }
+                break;
+            case '1':
+                difficulty = HARD;
+                break;
+            case '2':
+                difficulty = EASY;
                 break;
             case 'q':
             case 'Q':
